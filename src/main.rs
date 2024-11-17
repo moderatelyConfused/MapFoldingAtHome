@@ -20,7 +20,7 @@ impl StampFolder {
     fn foldings(&mut self, p: &[i32], flag: bool, res: i32, mod_val: i32) {
         // Calculate total number of leaves
         let n: i32 = p.iter().product();
-        
+
         // Initialize arrays
         let mut a = vec![0; (n + 1) as usize];
         let mut b = vec![0; (n + 1) as usize];
@@ -151,11 +151,24 @@ impl StampFolder {
         self.foldings(&self.get_dimensions(self.n), true, 0, 0);
         self.count
     }
+
+    // Helper function to calculate sequence for specific dimensions
+    fn calculate_sequence(dimensions: &[i32]) -> i64 {
+        // Special case: if any dimension is 0, return 1
+        if dimensions.iter().any(|&d| d == 0) {
+            return 1;
+        }
+
+        let mut folder = StampFolder::new();
+        folder.count = 0;
+        folder.foldings(dimensions, true, 0, 0);
+        folder.count
+    }
 }
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
-    
+
     if args.is_empty() {
         println!("Usage: [res/mod] dimension...");
         return;
@@ -181,4 +194,69 @@ fn main() {
     let mut folder = StampFolder::new();
     folder.foldings(&dimensions, true, res, mod_val);
     println!("{}", folder.count);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sequence_n_2() {
+        let expected = vec![
+            1, 2, 8, 60, 320, 1980, 10512, 60788, 320896,
+            1787904, 9381840, 51081844
+        ];
+
+        for (i, &expected_value) in expected.iter().enumerate() {
+            let dimensions = vec![i as i32, 2];
+            let result = StampFolder::calculate_sequence(&dimensions);
+            assert_eq!(
+                result,
+                expected_value,
+                "Failed for n={}, width=2: expected {}, got {}",
+                i,
+                expected_value,
+                result
+            );
+        }
+    }
+
+    #[test]
+    fn test_sequence_n_3() {
+        let expected = vec![
+            1, 6, 60, 1368, 15552, 201240, 2016432, 21582624
+        ];
+
+        for (i, &expected_value) in expected.iter().enumerate() {
+            let dimensions = vec![i as i32, 3];
+            let result = StampFolder::calculate_sequence(&dimensions);
+            assert_eq!(
+                result,
+                expected_value,
+                "Failed for n={}, width=3: expected {}, got {}",
+                i,
+                expected_value,
+                result
+            );
+        }
+    }
+
+    #[test]
+    fn test_sequence_n_n() {
+        let expected = vec![1, 1, 8, 1368, 300608];
+
+        for (i, &expected_value) in expected.iter().enumerate() {
+            let n = i as i32;
+            let dimensions = vec![n, n];
+            let result = StampFolder::calculate_sequence(&dimensions);
+            assert_eq!(
+                result,
+                expected_value,
+                "Failed for n×n where n={}: expected {}, got {}",
+                n,
+                expected_value,
+                result
+            );
+        }
+    }
 }
