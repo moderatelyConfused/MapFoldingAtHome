@@ -1,3 +1,5 @@
+use rayon::prelude::*;
+
 const MAX_N: usize = 32;
 
 #[derive(Copy, Clone)]
@@ -64,7 +66,7 @@ impl StampFolder {
         let l_idx = l as usize;
         let m_idx = m as usize;
         let delta = self.cache.c[i][l_idx] - self.cache.c[i][m_idx];
-        
+
         if (delta & 1) == 0 {
             if self.cache.c[i][m_idx] == 1 { m } else { m - self.cache.big_p[i - 1] }
         } else if self.cache.c[i][m_idx] == p[i - 1] || m + self.cache.big_p[i - 1] > l {
@@ -102,7 +104,7 @@ impl StampFolder {
                 *dd += 1;
                 continue;
             }
-            
+
             let mut m = self.cache.d[i][l as usize][l as usize];
             while m != l {
                 if mod_val == 0 || l != mod_val || m % mod_val == res {
@@ -180,16 +182,47 @@ impl StampFolder {
         }
     }
 
-    #[cfg(test)]
+    // Helper function to calculate sequence for specific dimensions
     pub fn calculate_sequence(dimensions: &[i32]) -> i64 {
+        // Special case: if any dimension is 0, return 1
         if dimensions.iter().any(|&d| d == 0) {
             return 1;
         }
 
         let mut folder = StampFolder::new();
-        folder.count = 0;
         folder.foldings(dimensions, true, 0, 0);
         folder.count
+    }
+
+    // Helper function to calculate sequence for specific dimensions and modulo parameters
+    pub fn calculate_sequence_part(dimensions: &[i32], part: usize, total_parts: usize) -> i64 {
+        // Special case: if any dimension is 0 and this is part 0, return 1
+        if dimensions.iter().any(|&d| d == 0) {
+            return if part == 0 { 1 } else { 0 };
+        }
+
+        let mut folder = StampFolder::new();
+        let n = dimensions.iter().product::<i32>();
+
+        // Generate a sequence of indices from part to n, stepping by total_parts
+        for i in (part..n as usize).step_by(total_parts) {
+            folder.foldings(dimensions, true, i as i32, total_parts as i32);
+        }
+        folder.count
+    }
+
+    // Helper function to calculate complete sequence using parallel processing
+    pub fn calculate_sequence_parallel(dimensions: &[i32], num_threads: usize) -> i64 {
+        // For very small dimensions, use direct calculation
+        let n: i32 = dimensions.iter().product();
+        if n < 4 {
+            return Self::calculate_sequence(dimensions);
+        }
+
+        // Use parallel iterator for larger dimensions
+        (0..num_threads).into_par_iter()
+            .map(|part| Self::calculate_sequence_part(dimensions, part, num_threads))
+            .sum()
     }
 }
 
@@ -206,7 +239,7 @@ mod tests {
 
         for (i, &expected_value) in expected.iter().enumerate() {
             let dimensions = vec![i as i32, 2];
-            let result = StampFolder::calculate_sequence(&dimensions);
+            let result = StampFolder::calculate_sequence_parallel(&dimensions, 4);
             assert_eq!(
                 result,
                 expected_value,
@@ -226,7 +259,7 @@ mod tests {
 
         for (i, &expected_value) in expected.iter().enumerate() {
             let dimensions = vec![i as i32, 3];
-            let result = StampFolder::calculate_sequence(&dimensions);
+            let result = StampFolder::calculate_sequence_parallel(&dimensions, 4);
             assert_eq!(
                 result,
                 expected_value,
@@ -245,7 +278,7 @@ mod tests {
         for (i, &expected_value) in expected.iter().enumerate() {
             let n = i as i32;
             let dimensions = vec![n, n];
-            let result = StampFolder::calculate_sequence(&dimensions);
+            let result = StampFolder::calculate_sequence_parallel(&dimensions, 4);
             assert_eq!(
                 result,
                 expected_value,

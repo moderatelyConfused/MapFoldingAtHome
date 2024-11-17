@@ -26,7 +26,14 @@ fn main() {
         .map(|s| s.parse::<i32>().unwrap())
         .collect();
 
-    let mut folder = StampFolder::new();
-    folder.foldings(&dimensions, true, res, mod_val);
-    println!("{}", folder.count);
+    if mod_val == 0 {
+        // Use parallel processing with number of threads based on CPU count
+        let num_threads = num_cpus::get();
+        let result = StampFolder::calculate_sequence_parallel(&dimensions, num_threads);
+        println!("{}", result);
+    } else {
+        // Calculate specific part as requested
+        let result = StampFolder::calculate_sequence_part(&dimensions, res as usize, mod_val as usize);
+        println!("{}", result);
+    }
 }

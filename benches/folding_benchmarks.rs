@@ -5,26 +5,23 @@ use folds::StampFolder;
 
 fn benchmark_small_dimensions(c: &mut Criterion) {
     let mut group = c.benchmark_group("Small Dimensions");
-    
+
     // Test small 2xN dimensions
     group.bench_function("2x2", |b| {
         b.iter(|| {
-            let mut folder = StampFolder::new();
-            folder.foldings(black_box(&[2, 2]), true, 0, 0);
+            StampFolder::calculate_sequence_parallel(black_box(&[2, 2]), 4);
         });
     });
 
     group.bench_function("2x3", |b| {
         b.iter(|| {
-            let mut folder = StampFolder::new();
-            folder.foldings(black_box(&[2, 3]), true, 0, 0);
+            StampFolder::calculate_sequence_parallel(black_box(&[2, 3]), 4);
         });
     });
 
     group.bench_function("2x4", |b| {
         b.iter(|| {
-            let mut folder = StampFolder::new();
-            folder.foldings(black_box(&[2, 4]), true, 0, 0);
+            StampFolder::calculate_sequence_parallel(black_box(&[2, 4]), 4);
         });
     });
 
@@ -33,18 +30,16 @@ fn benchmark_small_dimensions(c: &mut Criterion) {
 
 fn benchmark_medium_dimensions(c: &mut Criterion) {
     let mut group = c.benchmark_group("Medium Dimensions");
-    
+
     group.bench_function("3x3", |b| {
         b.iter(|| {
-            let mut folder = StampFolder::new();
-            folder.foldings(black_box(&[3, 3]), true, 0, 0);
+            StampFolder::calculate_sequence_parallel(black_box(&[3, 3]), 4);
         });
     });
 
     group.bench_function("3x4", |b| {
         b.iter(|| {
-            let mut folder = StampFolder::new();
-            folder.foldings(black_box(&[3, 4]), true, 0, 0);
+            StampFolder::calculate_sequence_parallel(black_box(&[3, 4]), 4);
         });
     });
 
@@ -53,11 +48,10 @@ fn benchmark_medium_dimensions(c: &mut Criterion) {
 
 fn benchmark_large_dimensions(c: &mut Criterion) {
     let mut group = c.benchmark_group("Large Dimensions");
-    
+
     group.bench_function("4x4", |b| {
         b.iter(|| {
-            let mut folder = StampFolder::new();
-            folder.foldings(black_box(&[4, 4]), true, 0, 0);
+            StampFolder::calculate_sequence_parallel(black_box(&[4, 4]), 4);
         });
     });
 
@@ -65,8 +59,7 @@ fn benchmark_large_dimensions(c: &mut Criterion) {
     group.sample_size(10); // Reduce sample size for larger dimensions
     group.bench_function("5x5", |b| {
         b.iter(|| {
-            let mut folder = StampFolder::new();
-            folder.foldings(black_box(&[5, 5]), true, 0, 0);
+            StampFolder::calculate_sequence_parallel(black_box(&[5, 5]), 4);
         });
     });
 
