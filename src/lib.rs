@@ -1,12 +1,12 @@
 use rayon::prelude::*;
 
-const MAX_N: usize = 32;
+const MAX_N: usize = 64;
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 struct CacheAlignedArrays {
     big_p: [i32; MAX_N],
     c: [[i32; MAX_N]; MAX_N],
-    d: [[[i32; MAX_N]; MAX_N]; MAX_N],
+    d: Box<[i32; MAX_N * MAX_N * MAX_N]>, // Flattened 3D array
 }
 
 pub struct StampFolder {
@@ -24,7 +24,7 @@ impl Default for CacheAlignedArrays {
         Self {
             big_p: [0; MAX_N],
             c: [[0; MAX_N]; MAX_N],
-            d: [[[0; MAX_N]; MAX_N]; MAX_N],
+            d: Box::new([0; MAX_N * MAX_N * MAX_N]),
         }
     }
 }
@@ -62,6 +62,16 @@ impl StampFolder {
     }
 
     #[inline(always)]
+    fn get_d(&self, i: usize, l: usize, m: usize) -> i32 {
+        self.cache.d[i * MAX_N * MAX_N + l * MAX_N + m]
+    }
+
+    #[inline(always)]
+    fn set_d(&mut self, i: usize, l: usize, m: usize, value: i32) {
+        self.cache.d[i * MAX_N * MAX_N + l * MAX_N + m] = value;
+    }
+
+    #[inline(always)]
     fn calculate_d(&self, i: usize, l: i32, m: i32, p: &[i32]) -> i32 {
         let l_idx = l as usize;
         let m_idx = m as usize;
@@ -91,7 +101,8 @@ impl StampFolder {
                 let l_idx = l as usize;
                 for m in 1..=l {
                     let m_idx = m as usize;
-                    self.cache.d[i][l_idx][m_idx] = self.calculate_d(i, l, m, p);
+                    let d_value = self.calculate_d(i, l, m, p);
+                    self.set_d(i, l_idx, m_idx, d_value);
                 }
             }
         }
@@ -100,12 +111,13 @@ impl StampFolder {
     #[inline(always)]
     fn process_gaps(&mut self, l: i32, g: &mut i32, gg: &mut i32, dd: &mut i32, dim: usize, res: i32, mod_val: i32) {
         for i in 1..=dim {
-            if self.cache.d[i][l as usize][l as usize] == l {
+            let l_idx = l as usize;
+            if self.get_d(i, l_idx, l_idx) == l {
                 *dd += 1;
                 continue;
             }
 
-            let mut m = self.cache.d[i][l as usize][l as usize];
+            let mut m = self.get_d(i, l_idx, l_idx);
             while m != l {
                 if mod_val == 0 || l != mod_val || m % mod_val == res {
                     self.gap[*gg as usize] = m;
@@ -114,7 +126,7 @@ impl StampFolder {
                         *gg += 1;
                     }
                 }
-                m = self.cache.d[i][l as usize][self.b[m as usize] as usize];
+                m = self.get_d(i, l_idx, self.b[m as usize] as usize);
             }
         }
 
