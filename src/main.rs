@@ -1,136 +1,182 @@
 use std::env;
 
+const MAX_N: usize = 32;
+
+#[derive(Copy, Clone)]
+struct CacheAlignedArrays {
+    big_p: [i32; MAX_N],
+    c: [[i32; MAX_N]; MAX_N],
+    d: [[[i32; MAX_N]; MAX_N]; MAX_N],
+}
+
 struct StampFolder {
     count: i64,
+    cache: CacheAlignedArrays,
+    a: [i32; MAX_N],
+    b: [i32; MAX_N],
+    count_array: [i32; MAX_N],
+    gapter: [i32; MAX_N],
+    gap: [i32; MAX_N * MAX_N],
+}
+
+impl Default for CacheAlignedArrays {
+    fn default() -> Self {
+        Self {
+            big_p: [0; MAX_N],
+            c: [[0; MAX_N]; MAX_N],
+            d: [[[0; MAX_N]; MAX_N]; MAX_N],
+        }
+    }
 }
 
 impl StampFolder {
+    #[inline(always)]
     fn new() -> Self {
         StampFolder {
             count: 0,
+            cache: CacheAlignedArrays::default(),
+            a: [0; MAX_N],
+            b: [0; MAX_N],
+            count_array: [0; MAX_N],
+            gapter: [0; MAX_N],
+            gap: [0; MAX_N * MAX_N],
         }
     }
 
-    fn process(&mut self, _a: &[i32], _b: &[i32], n: i32) {
+    #[inline(always)]
+    fn process(&mut self, n: i32) {
         self.count += n as i64;
     }
 
-    fn foldings(&mut self, p: &[i32], flag: bool, res: i32, mod_val: i32) {
-        // Calculate total number of leaves
-        let n: i32 = p.iter().product();
-
-        // Initialize arrays
-        let mut a = vec![0; (n + 1) as usize];
-        let mut b = vec![0; (n + 1) as usize];
-        let mut count = vec![0; (n + 1) as usize];
-        let mut gapter = vec![0; (n + 1) as usize];
-        let mut gap = vec![0; (n * n + 1) as usize];
-
-        let dim = p.len();
-        let mut big_p = vec![1; dim + 1];
-        let mut c = vec![vec![0; (n + 1) as usize]; dim + 1];
-        let mut d = vec![vec![vec![0; (n + 1) as usize]; (n + 1) as usize]; dim + 1];
-
-        // Calculate big_p array
+    #[inline(always)]
+    fn calculate_big_p(&mut self, p: &[i32], dim: usize) {
+        self.cache.big_p[0] = 1;
         for i in 1..=dim {
-            big_p[i] = big_p[i - 1] * p[i - 1];
+            self.cache.big_p[i] = self.cache.big_p[i - 1].wrapping_mul(p[i - 1]);
         }
+    }
 
-        // Calculate c array
+    #[inline(always)]
+    fn calculate_c(&self, i: usize, m: i32, p: &[i32]) -> i32 {
+        (m - 1) / self.cache.big_p[i - 1] - ((m - 1) / self.cache.big_p[i]) * p[i - 1] + 1
+    }
+
+    #[inline(always)]
+    fn calculate_d(&self, i: usize, l: i32, m: i32, p: &[i32]) -> i32 {
+        let l_idx = l as usize;
+        let m_idx = m as usize;
+        let delta = self.cache.c[i][l_idx] - self.cache.c[i][m_idx];
+        
+        if (delta & 1) == 0 {
+            if self.cache.c[i][m_idx] == 1 { m } else { m - self.cache.big_p[i - 1] }
+        } else if self.cache.c[i][m_idx] == p[i - 1] || m + self.cache.big_p[i - 1] > l {
+            m
+        } else {
+            m + self.cache.big_p[i - 1]
+        }
+    }
+
+    fn precalculate_arrays(&mut self, p: &[i32], n: i32, dim: usize) {
+        self.calculate_big_p(p, dim);
+
         for i in 1..=dim {
             for m in 1..=n {
-                c[i][m as usize] = (m - 1) / big_p[i - 1] - ((m - 1) / big_p[i]) * p[i - 1] + 1;
+                let m_idx = m as usize;
+                self.cache.c[i][m_idx] = self.calculate_c(i, m, p);
             }
         }
 
-        // Calculate d array
         for i in 1..=dim {
             for l in 1..=n {
+                let l_idx = l as usize;
                 for m in 1..=l {
-                    let delta = c[i][l as usize] - c[i][m as usize];
-                    d[i][l as usize][m as usize] = if (delta & 1) == 0 {
-                        if c[i][m as usize] == 1 {
-                            m
-                        } else {
-                            m - big_p[i - 1]
-                        }
-                    } else if c[i][m as usize] == p[i - 1] || m + big_p[i - 1] > l {
-                        m
-                    } else {
-                        m + big_p[i - 1]
-                    };
+                    let m_idx = m as usize;
+                    self.cache.d[i][l_idx][m_idx] = self.calculate_d(i, l, m, p);
                 }
             }
         }
+    }
+
+    #[inline(always)]
+    fn process_gaps(&mut self, l: i32, g: &mut i32, gg: &mut i32, dd: &mut i32, dim: usize, res: i32, mod_val: i32) {
+        for i in 1..=dim {
+            if self.cache.d[i][l as usize][l as usize] == l {
+                *dd += 1;
+                continue;
+            }
+            
+            let mut m = self.cache.d[i][l as usize][l as usize];
+            while m != l {
+                if mod_val == 0 || l != mod_val || m % mod_val == res {
+                    self.gap[*gg as usize] = m;
+                    self.count_array[m as usize] += 1;
+                    if self.count_array[m as usize] == 1 {
+                        *gg += 1;
+                    }
+                }
+                m = self.cache.d[i][l as usize][self.b[m as usize] as usize];
+            }
+        }
+
+        if *dd == dim as i32 {
+            for m in 0..l {
+                self.gap[*gg as usize] = m;
+                *gg += 1;
+            }
+        }
+
+        let g_start = *g;
+        for j in g_start..*gg {
+            let gap_j = self.gap[j as usize];
+            self.gap[*g as usize] = gap_j;
+            *g += (self.count_array[gap_j as usize] == (dim as i32 - *dd)) as i32;
+            self.count_array[gap_j as usize] = 0;
+        }
+    }
+
+    fn foldings(&mut self, p: &[i32], flag: bool, res: i32, mod_val: i32) {
+        let n: i32 = p.iter().product();
+        if n as usize >= MAX_N {
+            panic!("Dimension too large");
+        }
+
+        let dim = p.len();
+        self.precalculate_arrays(p, n, dim);
 
         let mut g = 0;
         let mut l = 1;
 
-        // Main backtrack loop
         while l > 0 {
-            if !flag || l <= 1 || b[0] == 1 {
+            if !flag || l <= 1 || self.b[0] == 1 {
                 if l > n {
-                    self.process(&a, &b, n);
+                    self.process(n);
                 } else {
                     let mut dd = 0;
-                    let mut gg = gapter[(l - 1) as usize];
+                    let mut gg = self.gapter[(l - 1) as usize];
                     g = gg;
-
-                    // Append potential gaps
-                    for i in 1..=dim {
-                        if d[i][l as usize][l as usize] == l {
-                            dd += 1;
-                        } else {
-                            let mut m = d[i][l as usize][l as usize];
-                            while m != l {
-                                if mod_val == 0 || l != mod_val || m % mod_val == res {
-                                    gap[gg as usize] = m;
-                                    count[m as usize] += 1;
-                                    if count[m as usize] == 1 {
-                                        gg += 1;
-                                    }
-                                }
-                                m = d[i][l as usize][b[m as usize] as usize];
-                            }
-                        }
-                    }
-
-                    // Handle case when dd == dim
-                    if dd == dim {
-                        for m in 0..l {
-                            gap[gg as usize] = m;
-                            gg += 1;
-                        }
-                    }
-
-                    // Process gaps
-                    for j in g..gg {
-                        gap[g as usize] = gap[j as usize];
-                        if count[gap[j as usize] as usize] == (dim - dd) as i32 {
-                            g += 1;
-                        }
-                        count[gap[j as usize] as usize] = 0;
-                    }
+                    self.process_gaps(l, &mut g, &mut gg, &mut dd, dim, res, mod_val);
                 }
             }
 
-            // Backtrack if necessary
-            while l > 0 && g == gapter[(l - 1) as usize] {
+            while l > 0 && g == self.gapter[(l - 1) as usize] {
                 l -= 1;
                 if l > 0 {
-                    b[a[l as usize] as usize] = b[l as usize];
-                    a[b[l as usize] as usize] = a[l as usize];
+                    let a_l = self.a[l as usize];
+                    let b_l = self.b[l as usize];
+                    self.b[a_l as usize] = b_l;
+                    self.a[b_l as usize] = a_l;
                 }
             }
 
-            // Insert new leaf and advance
             if l > 0 {
                 g -= 1;
-                a[l as usize] = gap[g as usize];
-                b[l as usize] = b[a[l as usize] as usize];
-                b[a[l as usize] as usize] = l;
-                a[b[l as usize] as usize] = l;
-                gapter[l as usize] = g;
+                let gap_g = self.gap[g as usize];
+                self.a[l as usize] = gap_g;
+                let b_gap = self.b[gap_g as usize];
+                self.b[l as usize] = b_gap;
+                self.b[gap_g as usize] = l;
+                self.a[b_gap as usize] = l;
+                self.gapter[l as usize] = g;
                 l += 1;
             }
         }
@@ -138,7 +184,6 @@ impl StampFolder {
 
     #[cfg(test)]
     fn calculate_sequence(dimensions: &[i32]) -> i64 {
-        // Special case: if any dimension is 0, return 1
         if dimensions.iter().any(|&d| d == 0) {
             return 1;
         }
