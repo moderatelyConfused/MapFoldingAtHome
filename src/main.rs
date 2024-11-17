@@ -1,14 +1,12 @@
 use std::env;
 
 struct StampFolder {
-    n: i32,
     count: i64,
 }
 
 impl StampFolder {
     fn new() -> Self {
         StampFolder {
-            n: -1,
             count: 0,
         }
     }
@@ -138,21 +136,7 @@ impl StampFolder {
         }
     }
 
-    fn get_dimensions(&self, n: i32) -> Vec<i32> {
-        vec![n, 2]
-    }
-
-    fn next(&mut self) -> i64 {
-        self.n += 1;
-        if self.n == 0 {
-            return 1;
-        }
-        self.count = 0;
-        self.foldings(&self.get_dimensions(self.n), true, 0, 0);
-        self.count
-    }
-
-    // Helper function to calculate sequence for specific dimensions
+    #[cfg(test)]
     fn calculate_sequence(dimensions: &[i32]) -> i64 {
         // Special case: if any dimension is 0, return 1
         if dimensions.iter().any(|&d| d == 0) {
