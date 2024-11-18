@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use folds::StampFolder;
+use folds::cpu::StampFolder;
 
 fn benchmark_rectangular(c: &mut Criterion) {
     let mut group = c.benchmark_group("Rectangular Dimensions");

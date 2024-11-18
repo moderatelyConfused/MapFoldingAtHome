@@ -1,7 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 // Import StampFolder directly since we're using it from main.rs
-use folds::StampFolder;
+use folds::cpu::StampFolder;
 
 fn benchmark_small_dimensions(c: &mut Criterion) {
     let mut group = c.benchmark_group("Small Dimensions");
