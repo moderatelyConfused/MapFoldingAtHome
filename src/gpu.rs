@@ -1,4 +1,7 @@
+use std::default::Default;
 use wgpu::util::DeviceExt;
+
+const MAX_N: usize = 32;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -15,6 +18,7 @@ pub struct StampFolder {
     params_buffer: wgpu::Buffer,
     p_array_buffer: wgpu::Buffer,
     count_buffer: wgpu::Buffer,
+    d_buffer: wgpu::Buffer,
 }
 
 impl StampFolder {
@@ -58,6 +62,16 @@ impl StampFolder {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -73,12 +87,14 @@ impl StampFolder {
             label: Some("Stamp Folding Pipeline"),
             layout: Some(&pipeline_layout),
             module: &shader,
-            entry_point: "main",
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
         // Calculate n and ensure it's within bounds
         let n: i32 = dimensions.iter().product();
-        assert!(n < 64, "Dimension too large: product must be less than 64");
+        assert!(n < MAX_N as i32, "Dimension too large: product must be less than MAX_N");
 
         // Create params
         let params = Params {
@@ -101,7 +117,7 @@ impl StampFolder {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_SRC,
         });
 
-        let mut padded_dimensions = vec![0i32; 64];
+        let mut padded_dimensions = vec![0i32; MAX_N];
         padded_dimensions[..dimensions.len()].copy_from_slice(dimensions);
         println!("Padded dimensions: {:?}", &padded_dimensions[..dimensions.len()]);
 
@@ -112,10 +128,18 @@ impl StampFolder {
         });
 
         // Initialize count buffer with zeros
-        let count_buffer_data = vec![0i32; 64];
+        let count_buffer_data = vec![0i32; MAX_N];
         let count_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Count Buffer"),
             contents: bytemuck::cast_slice(&count_buffer_data),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        });
+
+        // Initialize d buffer with zeros
+        let d_buffer_data = vec![0i32; MAX_N * MAX_N * MAX_N];
+        let d_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("d Buffer"),
+            contents: bytemuck::cast_slice(&d_buffer_data),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         });
 
@@ -135,6 +159,10 @@ impl StampFolder {
                     binding: 2,
                     resource: count_buffer.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: d_buffer.as_entire_binding(),
+                },
             ],
         });
 
@@ -144,6 +172,7 @@ impl StampFolder {
             params_buffer,
             p_array_buffer,
             count_buffer,
+            d_buffer,
         }
     }
 
@@ -230,8 +259,8 @@ impl StampFolder {
         if results_receiver.receive().await.unwrap().is_ok() {
             let data = results_slice.get_mapped_range();
             let result: Vec<i32> = bytemuck::cast_slice(&data).to_vec();
-            println!("Raw results: {:?}", &result[..64]);
-            result.iter().take(64).map(|&x| x as i64).sum()
+            println!("Raw results: {:?}", &result[..MAX_N]);
+            result.iter().take(MAX_N).map(|&x| x as i64).sum()
         } else {
             0
         }
@@ -257,13 +286,23 @@ impl StampFolder {
                 label: None,
                 required_features: wgpu::Features::empty(),
                 required_limits: wgpu::Limits::downlevel_defaults(),
+                memory_hints: wgpu::MemoryHints::MemoryUsage,
             },
             None
         ).await.unwrap();
 
+        device.start_capture();
+
+        println!("max compute workgroup storage size: {} bytes", device.limits().max_compute_workgroup_storage_size);
+        println!("{:?}", device.limits());
+
         println!("\nProcessing dimensions: {:?}", dimensions);
         let compute = StampFolder::new(&device, dimensions, 0, 0).await;
-        compute.compute(&device, &queue).await
+        let r = compute.compute(&device, &queue).await;
+
+        device.stop_capture();
+
+        r
     }
 }
 
@@ -272,7 +311,13 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn do_nothing() {
+    }
+
+    #[tokio::test]
     async fn test_sequence_n_2() {
+        env_logger::init();
+
         let expected = vec![
             1, 2, 8, 60, 320, 1980, 10512, 60788, 320896,
             1787904, 9381840, 51081844
@@ -280,6 +325,7 @@ mod tests {
 
         for (i, &expected_value) in expected.iter().enumerate() {
             let dimensions = vec![i as i32, 2];
+            println!("{:?}", dimensions);
             let result = StampFolder::calculate_sequence(&dimensions).await;
             assert_eq!(
                 result,

@@ -9,24 +9,28 @@ struct Params {
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var<storage, read> p_array: array<i32>;
 @group(0) @binding(2) var<storage, read_write> count_buffer: array<atomic<i32>>;
+@group(0) @binding(3) var<storage, read_write> d: array<i32>;
 
 // Constants
-const MAX_N: u32 = 64u;
-const MAX_N_SQ: u32 = 4096u;    // MAX_N * MAX_N
-const MAX_N_CUBE: u32 = 262144u; // MAX_N * MAX_N * MAX_N
+// const MAX_N: u32 = 64u;
+// const MAX_N_SQ: u32 = 4096u;    // MAX_N * MAX_N
+// const MAX_N_CUBE: u32 = 262144u; // MAX_N * MAX_N * MAX_N
+const MAX_N: u32 = 32u;
+const MAX_N_SQ: u32 = 32u*32u;    // MAX_N * MAX_N
+const MAX_N_CUBE: u32 = 32u*32u*32u; // MAX_N * MAX_N * MAX_N
 
 // Shared arrays (stored in workgroup memory for better performance)
 var<workgroup> big_p: array<i32, MAX_N>;
 var<workgroup> c: array<array<i32, MAX_N>, MAX_N>;
-var<workgroup> d: array<i32, MAX_N_CUBE>;
+// var<workgroup> d: array<i32, MAX_N_CUBE>;
 var<workgroup> gap: array<i32, MAX_N_SQ>;
 var<workgroup> count_array: array<atomic<i32>, MAX_N>;
 var<workgroup> gapter: array<i32, MAX_N>;
 var<workgroup> a: array<i32, MAX_N>;
 var<workgroup> b: array<i32, MAX_N>;
 
-fn get_d_index(i: u32, l: u32, m: u32) -> u32 {
-    return i * MAX_N_SQ + l * MAX_N + m;
+fn get_d_index(x: u32, i: u32, l: u32, m: u32) -> u32 {
+    return x * MAX_N_CUBE + i * MAX_N_SQ + l * MAX_N + m;
 }
 
 fn calculate_big_p() {
@@ -88,7 +92,7 @@ fn precalculate_arrays() {
     for(var i: u32 = 1u; i <= params.dim; i = i + 1u) {
         for(var l: u32 = 1u; l <= params.n; l = l + 1u) {
             for(var m: u32 = 1u; m <= l; m = m + 1u) {
-                let idx = get_d_index(i, l, m);
+                let idx = get_d_index(u32(0), i, l, m);
                 d[idx] = calculate_d(i, i32(l), i32(m));
             }
         }
@@ -98,7 +102,7 @@ fn precalculate_arrays() {
 fn process_gaps(l: i32, g: ptr<function, i32>, gg: ptr<function, i32>, dd: ptr<function, i32>) {
     for(var i: u32 = 1u; i <= params.dim; i = i + 1u) {
         let l_idx = u32(l);
-        let d_idx = get_d_index(i, l_idx, l_idx);
+        let d_idx = get_d_index(u32(0), i, l_idx, l_idx);
 
         if (d[d_idx] == l) {
             *dd = *dd + 1;
@@ -114,7 +118,7 @@ fn process_gaps(l: i32, g: ptr<function, i32>, gg: ptr<function, i32>, dd: ptr<f
                     *gg = *gg + 1;
                 }
             }
-            let new_idx = get_d_index(i, l_idx, u32(b[u32(m)]));
+            let new_idx = get_d_index(u32(0), i, l_idx, u32(b[u32(m)]));
             m = d[new_idx];
         }
     }
@@ -137,7 +141,7 @@ fn process_gaps(l: i32, g: ptr<function, i32>, gg: ptr<function, i32>, dd: ptr<f
     }
 }
 
-@compute @workgroup_size(64)
+@compute @workgroup_size(1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.x;
     if (idx >= params.n) {
