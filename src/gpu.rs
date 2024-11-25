@@ -323,6 +323,38 @@ impl StampFolder {
         let compute = StampFolder::new(&device, dimensions, 0, 0).await;
         compute.compute(&device, &queue).await
     }
+
+    pub async fn calculate_sequence_part(dimensions: &[i32], part: i32) -> i64 {
+        if dimensions.iter().any(|&d| d == 0) {
+            return 1;
+        }
+
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+        let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            force_fallback_adapter: false,
+            compatible_surface: None,
+        })
+            .await
+            .unwrap();
+
+        let (device, queue) = adapter.request_device(
+            &wgpu::DeviceDescriptor {
+                label: None,
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::downlevel_defaults(),
+                memory_hints: wgpu::MemoryHints::MemoryUsage,
+            },
+            None
+        ).await.unwrap();
+
+        let n = dimensions.iter().product::<i32>();
+        assert!(part < n, "Invalid part");
+
+        let compute = StampFolder::new(&device, dimensions, n as u32, part).await;
+        compute.compute(&device, &queue).await
+    }
+
 }
 
 #[cfg(test)]
@@ -347,6 +379,39 @@ mod tests {
                 expected_value,
                 result
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sequence_parts_n_2() {
+        let expected = vec![
+            &[0, 2][..],
+            &[0, 0, 4, 4],
+            &[0, 6, 0, 24, 12, 18],
+            &[0, 16, 16, 0, 112, 32, 32, 112],
+            &[0, 90, 50, 90, 0, 640, 160, 190, 170, 590],
+            &[0, 288, 288, 204, 420, 0, 3192, 516, 504, 888, 804, 3408],
+            &[0, 1652, 1036, 1512, 882, 2296, 0, 17752, 2856, 2758, 2548, 5040, 4466, 17990],
+            &[0, 5728, 5552, 4320, 7072, 4304, 11392, 0, 90432, 9504, 9264, 13072, 11920, 25344, 22672, 100320],
+            &[0, 32364, 21690, 28692, 18936, 37278, 20754, 61434, 0, 492804, 54108, 49140, 46134, 69552, 62550, 140616, 124524, 527328],
+            &[0, 117600, 111700, 92240, 133260, 89780, 184640, 106920, 311120, 0, 2527680, 185060, 179980, 229780, 211460, 349580, 313980, 720460, 642200, 2874400],
+            &[0, 659274, 457996, 572088, 406318, 690360, 430386, 973852, 535744, 1658954, 0, 13575672, 1070784, 937464, 887568, 1192422, 1082268, 1864588, 1664080, 3916880, 3472590, 15032556],
+        ];
+
+        for (i, &expected_values) in expected.iter().enumerate() {
+            let dimensions = vec![(i+1) as i32, 2];
+            for (part, &expected_value) in expected_values.iter().enumerate() {
+                let result = StampFolder::calculate_sequence_part(&dimensions, part as i32).await;
+                assert_eq!(
+                    result,
+                    expected_value,
+                    "Failed for n={}, width=2, part={}: expected {}, got {}",
+                    i+1,
+                    part,
+                    expected_value,
+                    result
+                );
+            }
         }
     }
 
