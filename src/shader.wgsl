@@ -12,12 +12,12 @@ struct Params {
 @group(0) @binding(3) var<storage, read_write> d: array<i32>;
 
 // Constants
-// const MAX_N: u32 = 64u;
-// const MAX_N_SQ: u32 = 4096u;    // MAX_N * MAX_N
-// const MAX_N_CUBE: u32 = 262144u; // MAX_N * MAX_N * MAX_N
-const MAX_N: u32 = 32u;
-const MAX_N_SQ: u32 = 32u*32u;    // MAX_N * MAX_N
-const MAX_N_CUBE: u32 = 32u*32u*32u; // MAX_N * MAX_N * MAX_N
+const MAX_N: u32 = 64u;
+const MAX_N_SQ: u32 = 4096u;    // MAX_N * MAX_N
+const MAX_N_CUBE: u32 = 262144u; // MAX_N * MAX_N * MAX_N
+// const MAX_N: u32 = 32u;
+// const MAX_N_SQ: u32 = 32u*32u;    // MAX_N * MAX_N
+// const MAX_N_CUBE: u32 = 32u*32u*32u; // MAX_N * MAX_N * MAX_N
 
 // Shared arrays (stored in workgroup memory for better performance)
 var<workgroup> big_p: array<i32, MAX_N>;

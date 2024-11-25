@@ -1,7 +1,7 @@
 use std::default::Default;
 use wgpu::util::DeviceExt;
 
-const MAX_N: usize = 32;
+const MAX_N: usize = 64;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -311,10 +311,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn do_nothing() {
-    }
-
-    #[tokio::test]
     async fn test_sequence_n_2() {
         env_logger::init();
 
@@ -332,6 +328,45 @@ mod tests {
                 expected_value,
                 "Failed for n={}, width=2: expected {}, got {}",
                 i,
+                expected_value,
+                result
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sequence_n_3() {
+        let expected = vec![
+            1, 6, 60, 1368, 15552, 201240, 2016432, 21582624
+        ];
+
+        for (i, &expected_value) in expected.iter().enumerate() {
+            let dimensions = vec![i as i32, 3];
+            let result = StampFolder::calculate_sequence(&dimensions).await;
+            assert_eq!(
+                result,
+                expected_value,
+                "Failed for n={}, width=3: expected {}, got {}",
+                i,
+                expected_value,
+                result
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sequence_n_n() {
+        let expected = vec![1, 1, 8, 1368, 300608];
+
+        for (i, &expected_value) in expected.iter().enumerate() {
+            let n = i as i32;
+            let dimensions = vec![n, n];
+            let result = StampFolder::calculate_sequence(&dimensions).await;
+            assert_eq!(
+                result,
+                expected_value,
+                "Failed for n×n where n={}: expected {}, got {}",
+                n,
                 expected_value,
                 result
             );
