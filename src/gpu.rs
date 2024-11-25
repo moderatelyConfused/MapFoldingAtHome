@@ -1,4 +1,3 @@
-use std::default::Default;
 use wgpu::util::DeviceExt;
 
 const MAX_N: usize = 64;
@@ -12,13 +11,30 @@ struct Params {
     res: i32,
 }
 
+pub struct PrecomputedArrays {
+    big_p: [i32; MAX_N],
+    c: [[i32; MAX_N]; MAX_N],
+    d: Box<[i32; MAX_N * MAX_N * MAX_N]>,
+}
+
+impl Default for PrecomputedArrays {
+    fn default() -> Self {
+        Self {
+            big_p: [0; MAX_N],
+            c: [[0; MAX_N]; MAX_N],
+            d: Box::new([0; MAX_N * MAX_N * MAX_N]),
+        }
+    }
+}
+
 pub struct StampFolder {
     pipeline: wgpu::ComputePipeline,
     bind_group: wgpu::BindGroup,
     params_buffer: wgpu::Buffer,
-    p_array_buffer: wgpu::Buffer,
-    count_buffer: wgpu::Buffer,
+    big_p_buffer: wgpu::Buffer,
+    c_buffer: wgpu::Buffer,
     d_buffer: wgpu::Buffer,
+    count_buffer: wgpu::Buffer,
 }
 
 impl StampFolder {
@@ -38,7 +54,7 @@ impl StampFolder {
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: Some(std::num::NonZeroU64::new(std::mem::size_of::<Params>() as u64).unwrap()),
+                        min_binding_size: None,
                     },
                     count: None,
                 },
@@ -56,7 +72,7 @@ impl StampFolder {
                     binding: 2,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -64,6 +80,16 @@ impl StampFolder {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
@@ -104,43 +130,76 @@ impl StampFolder {
             res,
         };
 
-        println!("Creating params: {:?}", params);
+        // Precompute arrays
+        let mut precomputed = PrecomputedArrays::default();
 
-        // Create a reference to params as a slice
-        let params_slice = std::slice::from_ref(&params);
-        println!("Params as slice bytes: {:?}", bytemuck::bytes_of(&params));
+        // Calculate big_p
+        precomputed.big_p[0] = 1;
+        for i in 1..=dimensions.len() {
+            precomputed.big_p[i] = precomputed.big_p[i - 1] * dimensions[i - 1];
+        }
 
-        // Main params buffer for shader use
+        // Calculate c array
+        for i in 1..=dimensions.len() {
+            for m in 1..=n as usize {
+                let big_p_im1 = precomputed.big_p[i - 1];
+                let big_p_i = precomputed.big_p[i];
+                let p_im1 = dimensions[i - 1];
+                precomputed.c[i][m] = (m as i32 - 1) / big_p_im1 - ((m as i32 - 1) / big_p_i) * p_im1 + 1;
+            }
+        }
+
+        // Calculate d array
+        for i in 1..=dimensions.len() {
+            for l in 1..=n as usize {
+                for m in 1..=l {
+                    let idx = i * MAX_N * MAX_N + l * MAX_N + m;
+                    let delta = precomputed.c[i][l] - precomputed.c[i][m];
+                    
+                    precomputed.d[idx] = if (delta & 1) == 0 {
+                        if precomputed.c[i][m] == 1 {
+                            m as i32
+                        } else {
+                            m as i32 - precomputed.big_p[i - 1]
+                        }
+                    } else if precomputed.c[i][m] == dimensions[i - 1] || (m as i32 + precomputed.big_p[i - 1] > l as i32) {
+                        m as i32
+                    } else {
+                        m as i32 + precomputed.big_p[i - 1]
+                    };
+                }
+            }
+        }
+
+        // Create buffers
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Params Buffer"),
             contents: bytemuck::cast_slice(&[params]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_SRC,
         });
 
-        let mut padded_dimensions = vec![0i32; MAX_N];
-        padded_dimensions[..dimensions.len()].copy_from_slice(dimensions);
-        println!("Padded dimensions: {:?}", &padded_dimensions[..dimensions.len()]);
-
-        let p_array_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("P Array Buffer"),
-            contents: bytemuck::cast_slice(&padded_dimensions),
+        let big_p_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Big P Buffer"),
+            contents: bytemuck::cast_slice(&precomputed.big_p),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         });
 
-        // Initialize count buffer with zeros
-        let count_buffer_data = vec![0i32; MAX_N];
+        let c_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("C Buffer"),
+            contents: bytemuck::cast_slice(&precomputed.c),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        });
+
+        let d_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("D Buffer"),
+            contents: bytemuck::cast_slice(precomputed.d.as_ref()),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        });
+
         let count_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Count Buffer"),
-            contents: bytemuck::cast_slice(&count_buffer_data),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        });
-
-        // Initialize d buffer with zeros
-        let d_buffer_data = vec![0i32; MAX_N * MAX_N * MAX_N];
-        let d_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("d Buffer"),
-            contents: bytemuck::cast_slice(&d_buffer_data),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            contents: bytemuck::cast_slice(&[0i32; MAX_N]),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
         });
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -153,15 +212,19 @@ impl StampFolder {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: p_array_buffer.as_entire_binding(),
+                    resource: big_p_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: count_buffer.as_entire_binding(),
+                    resource: c_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
                     resource: d_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: count_buffer.as_entire_binding(),
                 },
             ],
         });
@@ -170,14 +233,14 @@ impl StampFolder {
             pipeline,
             bind_group,
             params_buffer,
-            p_array_buffer,
-            count_buffer,
+            big_p_buffer,
+            c_buffer,
             d_buffer,
+            count_buffer,
         }
     }
 
     pub async fn compute(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> i64 {
-        // Submit compute pass
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Compute Encoder"),
         });
@@ -193,81 +256,47 @@ impl StampFolder {
         }
 
         queue.submit(Some(encoder.finish()));
-        device.poll(wgpu::Maintain::Wait); // Wait for compute to finish
+        device.poll(wgpu::Maintain::Wait);
 
-        // Create staging buffers
-        let params_staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Params Staging Buffer"),
-            size: std::mem::size_of::<Params>() as u64,
+        let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Staging Buffer"),
+            size: std::mem::size_of::<i32>() as u64,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
-        let results_staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Results Staging Buffer"),
-            size: self.count_buffer.size(),
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        // Copy data to staging buffers
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Copy Encoder"),
         });
 
         encoder.copy_buffer_to_buffer(
-            &self.params_buffer,
-            0,
-            &params_staging_buffer,
-            0,
-            params_staging_buffer.size()
-        );
-
-        encoder.copy_buffer_to_buffer(
             &self.count_buffer,
             0,
-            &results_staging_buffer,
+            &staging_buffer,
             0,
-            results_staging_buffer.size()
+            std::mem::size_of::<i32>() as u64,
         );
 
         queue.submit(Some(encoder.finish()));
-        device.poll(wgpu::Maintain::Wait); // Wait for copies to finish
 
-        // Read parameters
-        let params_slice = params_staging_buffer.slice(..);
-        let (params_sender, params_receiver) = futures_intrusive::channel::shared::oneshot_channel();
-        params_slice.map_async(wgpu::MapMode::Read, move |result| {
-            let _ = params_sender.send(result);
-        });
-
-        let results_slice = results_staging_buffer.slice(..);
-        let (results_sender, results_receiver) = futures_intrusive::channel::shared::oneshot_channel();
-        results_slice.map_async(wgpu::MapMode::Read, move |result| {
-            let _ = results_sender.send(result);
+        let buffer_slice = staging_buffer.slice(..);
+        let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = sender.send(result);
         });
 
         device.poll(wgpu::Maintain::Wait);
 
-        // Wait for both mappings to complete
-        if params_receiver.receive().await.unwrap().is_ok() {
-            let params_data = params_slice.get_mapped_range();
-            let params: &[Params] = bytemuck::cast_slice(&*params_data);
-            println!("Shader params: {:?}", params[0]);
-        }
-
-        if results_receiver.receive().await.unwrap().is_ok() {
-            let data = results_slice.get_mapped_range();
-            let result: Vec<i32> = bytemuck::cast_slice(&data).to_vec();
-            println!("Raw results: {:?}", &result[..MAX_N]);
-            result.iter().take(MAX_N).map(|&x| x as i64).sum()
+        if receiver.receive().await.unwrap().is_ok() {
+            let data = buffer_slice.get_mapped_range();
+            let result: i32 = bytemuck::cast_slice(&*data)[0];
+            result as i64
         } else {
             0
         }
     }
 
     pub async fn calculate_sequence(dimensions: &[i32]) -> i64 {
-        // Special case: if any dimension is 0, return 1
         if dimensions.iter().any(|&d| d == 0) {
             return 1;
         }
@@ -291,18 +320,8 @@ impl StampFolder {
             None
         ).await.unwrap();
 
-        device.start_capture();
-
-        println!("max compute workgroup storage size: {} bytes", device.limits().max_compute_workgroup_storage_size);
-        println!("{:?}", device.limits());
-
-        println!("\nProcessing dimensions: {:?}", dimensions);
         let compute = StampFolder::new(&device, dimensions, 0, 0).await;
-        let r = compute.compute(&device, &queue).await;
-
-        device.stop_capture();
-
-        r
+        compute.compute(&device, &queue).await
     }
 }
 
@@ -312,8 +331,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_sequence_n_2() {
-        env_logger::init();
-
         let expected = vec![
             1, 2, 8, 60, 320, 1980, 10512, 60788, 320896,
             1787904, 9381840, 51081844
@@ -321,7 +338,6 @@ mod tests {
 
         for (i, &expected_value) in expected.iter().enumerate() {
             let dimensions = vec![i as i32, 2];
-            println!("{:?}", dimensions);
             let result = StampFolder::calculate_sequence(&dimensions).await;
             assert_eq!(
                 result,
